@@ -1,29 +1,54 @@
+import logging
 import shutil
 import subprocess
 from pathlib import Path
+import requests
 import time
 from bs4 import BeautifulSoup
 
-DOMAIN = "" # The domain you want to process
-PATH = "login" # The path_segment of the possible login page. Example: login, admin, auth/login
+DOMAIN = "your_domain"
+PATH = "login"
 
-def installed(*programs): # check if tools are installed (*multiple tools possible)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+
+def installed(*programs):
     return [program for program in programs if shutil.which(program)]
 
+
 def sc(domain: str, path:str):
-    url = f"https://{domain}/{path}" # build url using protocol + domain and path
+    url = f"https://{domain}/{path}"
 
     if "wget" not in installed("wget"):
-        print("wget is not installed.")
-        return False # if return function stops
+        logger.error("wget is not installed.")
+        return False
 
     try:
-        subprocess.run( # use subprocess to execute a command-line-tool
+        response = requests.get(url, timeout=10)
+    except requests.RequestException as e:
+        logger.error("NO RESPONSE FOR %s! ERROR: %s", domain, e)
+        return False
+
+    statusc = response.status_code
+
+    logger.info("%s returned HTTP status %s", domain, statusc)
+
+    try:
+        result = subprocess.run(
             [
-                "wget",                 # Download files from a URL
-                "--page-requisites",    # Download all files required to display the page correctly
-                "--convert-links",      # Convert downloaded links so they work locally
-                "--adjust-extension",   # Add the appropriate file extension to downloaded files
+                "wget",
+                "--page-requisites",
+                "--convert-links",
+                "--adjust-extension",
                 url
             ],
             check=True,
@@ -31,32 +56,38 @@ def sc(domain: str, path:str):
             capture_output=True
         )
 
-        print("wget succeeded for:", domain)
+        logger.info("wget succeeded for %s", domain)
+        logger.info(result.stdout)
 
     except subprocess.CalledProcessError as e:
-        print("wget failed for:", domain, e)
+        logger.error("wget failed for %s: %s", domain, e)
+        logger.error("wget output: %s", e.stderr)
         return False
 
     time.sleep(2)
 
     login_dir = Path(__name__).parent
-    login_page = login_dir/domain/f"{PATH}.html" # downloaded page. PATH is ussaly the filename
+    login_page = login_dir/DOMAIN/f"{PATH}.html" # needs to be file name
 
     if login_page.exists():
+        print("True")
 
-        with open(login_page, "r", encoding="utf-8") as f: # stores the value of login_page in f
-            soup = BeautifulSoup(f, "html.parser") # bs4 object
+        print(login_page)
 
-        form = soup.find("form") # find form (the section where inputs are)
-        form["action"] = "/post" # write action="/post" for app.py
+        with open(login_page, "r", encoding="utf-8") as f:
+            soup = BeautifulSoup(f, "html.parser")
+
+        form = soup.find("form")
+        form["action"] = "/post"
 
         inputs = form.find_all("input")
 
-        inputs[0]["name"] = "email" # change first input name to email for app.py
-        inputs[1]["name"] = "password" # change second input name to passwort for app.py
+        inputs[0]["name"] = "email"
+        inputs[1]["name"] = "password"
+
 
         with open("templates/index.html", "w", encoding="utf-8") as f:
-            f.write(str(soup)) # store new template template/index.html
+            f.write(str(soup))
 
 sc(DOMAIN, PATH)
 
